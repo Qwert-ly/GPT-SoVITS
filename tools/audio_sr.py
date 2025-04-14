@@ -1,25 +1,34 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import sys
-import os
+import sys, os
+import traceback
 
-AP_BWE_main_dir_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "AP_BWE_main")
+AP_BWE_main_dir_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'AP_BWE_main')
 sys.path.append(AP_BWE_main_dir_path)
+import glob
+import argparse
 import json
+from re import S
 import torch
+import numpy as np
+import torchaudio
+import time
 import torchaudio.functional as aF
 # from attrdict import AttrDict####will be bug in py3.10
 
 from datasets1.dataset import amp_pha_stft, amp_pha_istft
 from models.model import APNet_BWE_Model
+import soundfile as sf
+import matplotlib.pyplot as plt
+from rich.progress import track
 
 
-class AP_BWE:
+class AP_BWE():
     def __init__(self, device, DictToAttrRecursive, checkpoint_file=None):
         if checkpoint_file == None:
             checkpoint_file = "%s/24kto48k/g_24kto48k.zip" % (AP_BWE_main_dir_path)
             if os.path.exists(checkpoint_file) == False:
                 raise FileNotFoundError
-        config_file = os.path.join(os.path.split(checkpoint_file)[0], "config.json")
+        config_file = os.path.join(os.path.split(checkpoint_file)[0], 'config.json')
         with open(config_file) as f:
             data = f.read()
         json_config = json.loads(data)
@@ -27,7 +36,7 @@ class AP_BWE:
         h = DictToAttrRecursive(json_config)
         model = APNet_BWE_Model(h).to(device)
         state_dict = torch.load(checkpoint_file, map_location="cpu", weights_only=False)
-        model.load_state_dict(state_dict["generator"])
+        model.load_state_dict(state_dict['generator'])
         model.eval()
         self.device = device
         self.model = model

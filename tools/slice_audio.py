@@ -1,9 +1,6 @@
-import os
-import sys
-import numpy as np
+import os, sys, numpy as np
 import traceback
 from scipy.io import wavfile
-
 # parent_directory = os.path.dirname(os.path.abspath(__file__))
 # sys.path.append(parent_directory)
 from tools.my_utils import load_audio
@@ -28,7 +25,7 @@ def slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max_sil_
     )
     _max = float(_max)
     alpha = float(alpha)
-    for inp_path in input[int(i_part) :: int(all_part)]:
+    for inp_path in input[int(i_part)::int(all_part)]:
         # print(inp_path)
         try:
             name = os.path.basename(inp_path)
@@ -36,11 +33,10 @@ def slice(inp, opt_root, threshold, min_length, min_interval, hop_size, max_sil_
             # print(audio.shape)
             for chunk, start, end in slicer.slice(audio):  # start和end是帧数
                 tmp_max = np.abs(chunk).max()
-                if tmp_max > 1:
-                    chunk /= tmp_max
+                if tmp_max > 1: chunk /= tmp_max
                 chunk = (chunk / tmp_max * (_max * alpha)) + (1 - alpha) * chunk
                 wavfile.write(
-                    "%s/%s_%010d_%010d.wav" % (opt_root, name, start, end),
+                    f"{opt_root}/{name}_{start: %010d}_{end: %010d}.wav",
                     32000,
                     # chunk.astype(np.float32),
                     (chunk * 32767).astype(np.int16),

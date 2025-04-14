@@ -369,34 +369,7 @@ class Sovits:
         self.cfm = cfm
 
 
-class DictToAttrRecursive(dict):
-    def __init__(self, input_dict):
-        super().__init__(input_dict)
-        for key, value in input_dict.items():
-            if isinstance(value, dict):
-                value = DictToAttrRecursive(value)
-            self[key] = value
-            setattr(self, key, value)
-
-    def __getattr__(self, item):
-        try:
-            return self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
-
-    def __setattr__(self, key, value):
-        if isinstance(value, dict):
-            value = DictToAttrRecursive(value)
-        super(DictToAttrRecursive, self).__setitem__(key, value)
-        super().__setattr__(key, value)
-
-    def __delattr__(self, item):
-        try:
-            del self[item]
-        except KeyError:
-            raise AttributeError(f"Attribute {item} not found")
-
-
+from inf_utils import DictToAttrRecursive
 from process_ckpt import get_sovits_version_from_path_fast, load_sovits_new
 
 
@@ -405,7 +378,7 @@ def get_sovits_weights(sovits_path):
     is_exist_s2gv3 = os.path.exists(path_sovits_v3)
 
     version, model_version, if_lora_v3 = get_sovits_version_from_path_fast(sovits_path)
-    if if_lora_v3 == True and is_exist_s2gv3 == False:
+    if if_lora_v3 and not is_exist_s2gv3:
         logger.info("SoVITS V3 底模缺失，无法加载相应 LoRA 权重")
 
     dict_s2 = load_sovits_new(sovits_path)
@@ -434,7 +407,7 @@ def get_sovits_weights(sovits_path):
     model_version = hps.model.version
     logger.info(f"模型版本: {model_version}")
 
-    if is_half == True:
+    if is_half:
         vq_model = vq_model.half().to(device)
     else:
         vq_model = vq_model.to(device)

@@ -1,8 +1,7 @@
 import traceback
 from collections import OrderedDict
 from time import time as ttime
-import shutil
-import os
+import shutil, os
 import torch
 from tools.i18n.i18n import I18nAuto
 
@@ -17,14 +16,14 @@ def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
     shutil.move(tmp_path, "%s/%s" % (dir, name))
 
 
-"""
+'''
 00:v1
 01:v2
 02:v3
 03:v3lora
 
 
-"""
+'''
 from io import BytesIO
 
 
@@ -33,9 +32,8 @@ def my_save2(fea, path):
     torch.save(fea, bio)
     bio.seek(0)
     data = bio.getvalue()
-    data = b"03" + data[2:]  ###temp for v3lora only, todo
-    with open(path, "wb") as f:
-        f.write(data)
+    data = b'03' + data[2:]  ###temp for v3lora only, todo
+    with open(path, "wb") as f: f.write(data)
 
 
 def savee(ckpt, name, epoch, steps, hps, lora_rank=None):
@@ -59,10 +57,10 @@ def savee(ckpt, name, epoch, steps, hps, lora_rank=None):
 
 
 head2version = {
-    b"00": ["v1", "v1", False],
-    b"01": ["v2", "v2", False],
-    b"02": ["v2", "v3", False],
-    b"03": ["v2", "v3", True],
+    b'00': ["v1", "v1", False],
+    b'01': ["v2", "v2", False],
+    b'02': ["v2", "v3", False],
+    b'03': ["v2", "v3", True],
 }
 hash_pretrained_dict = {
     "dc3c97e17592963677a4a1681f30c653": ["v2", "v2", False],  # s2G488k.pth#sovits_v1_pretrained
@@ -73,8 +71,7 @@ import hashlib
 
 
 def get_hash_from_file(sovits_path):
-    with open(sovits_path, "rb") as f:
-        data = f.read(8192)
+    with open(sovits_path, "rb") as f: data = f.read(8192)
     hash_md5 = hashlib.md5()
     hash_md5.update(data)
     return hash_md5.hexdigest()
@@ -93,12 +90,12 @@ def get_sovits_version_from_path_fast(sovits_path):
     ###3-old weights, by file size
     if_lora_v3 = False
     size = os.path.getsize(sovits_path)
-    """
+    '''
             v1weights:about 82942KB
                 half thr:82978KB
             v2weights:about 83014KB
             v3weights:about 750MB
-    """
+    '''
     if size < 82978 * 1024:
         model_version = version = "v1"
     elif size < 700 * 1024 * 1024:
@@ -113,7 +110,7 @@ def load_sovits_new(sovits_path):
     f = open(sovits_path, "rb")
     meta = f.read(2)
     if meta != "PK":
-        data = b"PK" + f.read()
+        data = b'PK' + f.read()
         bio = BytesIO()
         bio.write(data)
         bio.seek(0)

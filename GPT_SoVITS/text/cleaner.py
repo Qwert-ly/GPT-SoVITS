@@ -1,11 +1,5 @@
 from text import cleaned_text_to_sequence
 import os
-# if os.environ.get("version","v1")=="v1":
-#     from text import chinese
-#     from text.symbols import symbols
-# else:
-#     from text import chinese2 as chinese
-#     from text.symbols2 import symbols
 
 from text import symbols as symbols_v1
 from text import symbols2 as symbols_v2
@@ -19,14 +13,13 @@ special = [
 
 
 def clean_text(text, language, version=None):
-    if version is None:
-        version = os.environ.get("version", "v2")
+    if version is None: version = os.environ.get('version', 'v2')
+    language_module_map = {"zh": "chinese", "ja": "japanese", "en": "english"}
     if version == "v1":
         symbols = symbols_v1.symbols
-        language_module_map = {"zh": "chinese", "ja": "japanese", "en": "english"}
     else:
         symbols = symbols_v2.symbols
-        language_module_map = {"zh": "chinese2", "ja": "japanese", "en": "english", "ko": "korean", "yue": "cantonese"}
+        language_module_map.update({"ko": "korean", "yue": "cantonese"})
 
     if language not in language_module_map:
         language = "en"
@@ -46,18 +39,16 @@ def clean_text(text, language, version=None):
     elif language == "en":
         phones = language_module.g2p(norm_text)
         if len(phones) < 4:
-            phones = [","] + phones
+            phones = [','] + phones
         word2ph = None
     else:
         phones = language_module.g2p(norm_text)
         word2ph = None
-    phones = ["UNK" if ph not in symbols else ph for ph in phones]
-    return phones, word2ph, norm_text
+    return ['UNK' if ph not in symbols else ph for ph in phones], word2ph, norm_text
 
 
 def clean_special(text, language, special_s, target_symbol, version=None):
-    if version is None:
-        version = os.environ.get("version", "v2")
+    if version is None: version = os.environ.get('version', 'v2')
     if version == "v1":
         symbols = symbols_v1.symbols
         language_module_map = {"zh": "chinese", "ja": "japanese", "en": "english"}
@@ -83,9 +74,8 @@ def clean_special(text, language, special_s, target_symbol, version=None):
 
 
 def text_to_sequence(text, language, version=None):
-    version = os.environ.get("version", version)
-    if version is None:
-        version = "v2"
+    version = os.environ.get('version', version)
+    if version is None: version = 'v2'
     phones = clean_text(text)
     return cleaned_text_to_sequence(phones, version)
 

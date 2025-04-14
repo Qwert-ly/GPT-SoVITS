@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 
-import os
+import torch, shutil
+import os.path
+from text.cleaner import clean_text
+from transformers import AutoModelForMaskedLM, AutoTokenizer
+from tools.my_utils import clean_path
+from basic_util import *
+from inf_utils import get_bert_feature
 
 inp_text = os.environ.get("inp_text")
 inp_wav_dir = os.environ.get("inp_wav_dir")
@@ -11,133 +17,125 @@ if "_CUDA_VISIBLE_DEVICES" in os.environ:
     os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["_CUDA_VISIBLE_DEVICES"]
 opt_dir = os.environ.get("opt_dir")
 bert_pretrained_dir = os.environ.get("bert_pretrained_dir")
-import torch
-
 is_half = eval(os.environ.get("is_half", "True")) and torch.cuda.is_available()
-version = os.environ.get("version", None)
-import traceback
-import os.path
-from text.cleaner import clean_text
-from transformers import AutoModelForMaskedLM, AutoTokenizer
-from tools.my_utils import clean_path
+version = os.environ.get('version', None)
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=estimate_safe_workers())
 
-# inp_text=sys.argv[1]
-# inp_wav_dir=sys.argv[2]
-# exp_name=sys.argv[3]
-# i_part=sys.argv[4]
-# all_parts=sys.argv[5]
-# os.environ["CUDA_VISIBLE_DEVICES"]=sys.argv[6]#i_gpu
-# opt_dir="/data/docker/liujing04/gpt-vits/fine_tune_dataset/%s"%exp_name
-# bert_pretrained_dir="/data/docker/liujing04/bert-vits2/Bert-VITS2-master20231106/bert/chinese-roberta-wwm-ext-large"
-
-from time import time as ttime
-import shutil
+import tempfile, uuid
 
 
-def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
-    dir = os.path.dirname(path)
-    name = os.path.basename(path)
-    # tmp_path="%s/%s%s.pth"%(dir,ttime(),i_part)
-    tmp_path = "%s%s.pth" % (ttime(), i_part)
-    torch.save(fea, tmp_path)
-    shutil.move(tmp_path, "%s/%s" % (dir, name))
+async def my_save(fea, path):  #####fix issue: torch.save doesn't support chinese path
+    loop = asyncio.get_event_loop()
+
+    dir_path = os.path.dirname(path)
+    if dir_path and not os.path.exists(dir_path):
+        os.makedirs(dir_path, exist_ok=True)
+
+    temp_dir = tempfile.gettempdir()
+    tmp_path = os.path.join(temp_dir, f"{int(ttime())}_{uuid.uuid4().hex[:8]}.pth")
+
+    try:
+        await loop.run_in_executor(
+            thread_pool,
+            functools.partial(torch.save, fea, tmp_path)
+        )
+
+        await loop.run_in_executor(
+            thread_pool,
+            functools.partial(shutil.move, tmp_path, path)
+        )
+    except Exception as e:
+        print(f"保存中出错: {str(e)}")
+        if os.path.exists(tmp_path):
+            await loop.run_in_executor(
+                thread_pool,
+                functools.partial(os.remove, tmp_path)
+            )
+        raise
 
 
-txt_path = "%s/2-name2text-%s.txt" % (opt_dir, i_part)
-if os.path.exists(txt_path) == False:
-    bert_dir = "%s/3-bert" % (opt_dir)
-    os.makedirs(opt_dir, exist_ok=True)
-    os.makedirs(bert_dir, exist_ok=True)
-    if torch.cuda.is_available():
-        device = "cuda:0"
-    # elif torch.backends.mps.is_available():
-    #     device = "mps"
-    else:
-        device = "cpu"
-    if os.path.exists(bert_pretrained_dir):
-        ...
-    else:
-        raise FileNotFoundError(bert_pretrained_dir)
-    tokenizer = AutoTokenizer.from_pretrained(bert_pretrained_dir)
-    bert_model = AutoModelForMaskedLM.from_pretrained(bert_pretrained_dir)
-    if is_half == True:
-        bert_model = bert_model.half().to(device)
-    else:
-        bert_model = bert_model.to(device)
+txt_path = f"{opt_dir}/2-name2text-{i_part}.txt"
+if os.path.exists(txt_path):
+    raise ()
+bert_dir = f"{opt_dir}/3-bert"
+os.makedirs(opt_dir, exist_ok=True)
+os.makedirs(bert_dir, exist_ok=True)
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+if not os.path.exists(bert_pretrained_dir):
+    raise FileNotFoundError(bert_pretrained_dir)
+tokenizer = AutoTokenizer.from_pretrained(bert_pretrained_dir)
+bert_model = AutoModelForMaskedLM.from_pretrained(bert_pretrained_dir)
+if is_half:
+    bert_model = bert_model.half().to(device)
+else:
+    bert_model = bert_model.to(device)
 
-    def get_bert_feature(text, word2ph):
-        with torch.no_grad():
-            inputs = tokenizer(text, return_tensors="pt")
-            for i in inputs:
-                inputs[i] = inputs[i].to(device)
-            res = bert_model(**inputs, output_hidden_states=True)
-            res = torch.cat(res["hidden_states"][-3:-2], -1)[0].cpu()[1:-1]
 
-        assert len(word2ph) == len(text)
-        phone_level_feature = []
-        for i in range(len(word2ph)):
-            repeat_feature = res[i].repeat(word2ph[i], 1)
-            phone_level_feature.append(repeat_feature)
+@async_processor
+def process_single_item(name: str, text: str, lan: str, bert_dir: str, version: str) -> Tuple[str, str, str, str]:
+    """处理单个数据项"""
+    try:
+        name = clean_path(name)
+        name = os.path.basename(name)
+        print(name)
+        phones, word2ph, norm_text = clean_text(text.replace("%", "-").replace("￥", ","), lan, version)
+        path_bert = f"{bert_dir}/{name}.pt"
+        if not os.path.exists(path_bert) and lan == "zh":
+            bert_feature = get_bert_feature(norm_text, word2ph, tokenizer, bert_model)
+            assert bert_feature.shape[-1] == len(phones)
+            asyncio.run(my_save(bert_feature, path_bert))
+        phones_str = " ".join(phones)
+        return name, phones_str, word2ph, norm_text
+    except Exception as e:
+        print(f"处理{name}：{text}发生错误")
+        print(traceback.format_exc())
+        return None
 
-        phone_level_feature = torch.cat(phone_level_feature, dim=0)
 
-        return phone_level_feature.T
+todo = []
+res = []
+with open(inp_text, "r", encoding="utf8") as f:
+    lines = f.read().strip("\n").split("\n")
 
-    def process(data, res):
-        for name, text, lan in data:
-            try:
-                name = clean_path(name)
-                name = os.path.basename(name)
-                print(name)
-                phones, word2ph, norm_text = clean_text(text.replace("%", "-").replace("￥", ","), lan, version)
-                path_bert = "%s/%s.pt" % (bert_dir, name)
-                if os.path.exists(path_bert) == False and lan == "zh":
-                    bert_feature = get_bert_feature(norm_text, word2ph)
-                    assert bert_feature.shape[-1] == len(phones)
-                    # torch.save(bert_feature, path_bert)
-                    my_save(bert_feature, path_bert)
-                phones = " ".join(phones)
-                # res.append([name,phones])
-                res.append([name, phones, word2ph, norm_text])
-            except:
-                print(name, text, traceback.format_exc())
+language_v1_to_language_v2 = {
+    "ZH": "zh",
+    "zh": "zh",
+    "JP": "ja",
+    "jp": "ja",
+    "JA": "ja",
+    "ja": "ja",
+    "EN": "en",
+    "en": "en",
+    "En": "en",
+    "KO": "ko",
+    "Ko": "ko",
+    "ko": "ko",
+    "yue": "yue",
+    "YUE": "yue",
+    "Yue": "yue",
+}
+for line in lines[int(i_part)::int(all_parts)]:
+    try:
+        wav_name, spk_name, language, text = line.split("|")
 
-    todo = []
-    res = []
-    with open(inp_text, "r", encoding="utf8") as f:
-        lines = f.read().strip("\n").split("\n")
+        if language in language_v1_to_language_v2.keys():
+            todo.append(
+                [wav_name, text, language_v1_to_language_v2.get(language, language)]
+            )
+        else:
+            print(f"\033[33m[Waring] 训练不支持{wav_name}的{language = }。\033[0m")
+    except:
+        print(line, traceback.format_exc())
 
-    language_v1_to_language_v2 = {
-        "ZH": "zh",
-        "zh": "zh",
-        "JP": "ja",
-        "jp": "ja",
-        "JA": "ja",
-        "ja": "ja",
-        "EN": "en",
-        "en": "en",
-        "En": "en",
-        "KO": "ko",
-        "Ko": "ko",
-        "ko": "ko",
-        "yue": "yue",
-        "YUE": "yue",
-        "Yue": "yue",
-    }
-    for line in lines[int(i_part) :: int(all_parts)]:
-        try:
-            wav_name, spk_name, language, text = line.split("|")
-            # todo.append([name,text,"zh"])
-            if language in language_v1_to_language_v2.keys():
-                todo.append([wav_name, text, language_v1_to_language_v2.get(language, language)])
-            else:
-                print(f"\033[33m[Waring] The {language = } of {wav_name} is not supported for training.\033[0m")
-        except:
-            print(line, traceback.format_exc())
 
-    process(todo, res)
+async def main():
+    res = await process_single_item(todo, bert_dir, version)
     opt = []
     for name, phones, word2ph, norm_text in res:
-        opt.append("%s\t%s\t%s\t%s" % (name, phones, word2ph, norm_text))
+        opt.append(f"{name}\t{phones}\t{word2ph}\t{norm_text}")
     with open(txt_path, "w", encoding="utf8") as f:
         f.write("\n".join(opt) + "\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
